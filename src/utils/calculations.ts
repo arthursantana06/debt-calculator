@@ -67,7 +67,7 @@ export function calculateDebtDetails(
   debt: Debt,
   payments: Payment[],
   currentDate: Date = new Date(),
-  allDebts: Debt[] = []
+  _allDebts: Debt[] = []
 ): CalculatedDebtDetails {
   const p = debt.valor_inicial;
   const r = debt.taxa_juros / 100; // Taxa em decimal

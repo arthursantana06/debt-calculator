@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Search, FolderKanban } from 'lucide-react';
-import { calculateDebtDetails } from '../utils/calculations';
 import type { Debt, Payment } from '../utils/calculations';
 import { DebtItem } from './DebtItem';
 

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { db, isSupabaseConfigured } from './supabaseClient';
-import { calculateDebtDetails } from './utils/calculations';
 import type { Debt, Payment } from './utils/calculations';
 import { Dashboard } from './components/Dashboard';
 import { DebtForm } from './components/DebtForm';
