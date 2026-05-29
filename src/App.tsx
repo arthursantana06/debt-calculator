@@ -186,9 +186,9 @@ function App() {
 
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center overflow-x-hidden">
       {/* Header Container */}
-      <header className="w-full max-w-md md:w-full md:max-w-2xl px-4 pt-6 pb-3 flex items-center justify-between">
+      <header className="w-full max-w-[28rem] px-4 pt-6 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="p-2 border border-zinc-900 bg-zinc-900/15 rounded-lg">
             <Scale className="w-4 h-4 text-zinc-400" />
@@ -216,7 +216,7 @@ function App() {
       </header>
 
       {/* Main Container */}
-      <main className="w-full max-w-md md:w-full md:max-w-2xl flex-1 flex flex-col py-2">
+      <main className="w-full max-w-[28rem] flex-1 flex flex-col py-2">
         {loading ? (
           <div className="flex-1 flex flex-col items-center justify-center py-20 text-zinc-550 space-y-3">
             <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
@@ -234,7 +234,7 @@ function App() {
             <NotesSection />
 
             {/* Formulários de Dívida e Abatimento lado a lado */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4 mb-4">
+            <div className="grid grid-cols-1 gap-4 px-4 mb-4">
               <DebtForm onAddDebt={handleAddDebt} />
               <PaymentForm debts={debts} payments={payments} onAddPayment={handleAddAllocatedPayments} />
             </div>

@@ -60,7 +60,7 @@ export function DebtForm({ onAddDebt }: DebtFormProps) {
   };
 
   return (
-    <div className="w-full px-4 mb-4">
+    <div className="w-full">
       {/* Botão de abrir/fechar */}
       {!isOpen ? (
         <button

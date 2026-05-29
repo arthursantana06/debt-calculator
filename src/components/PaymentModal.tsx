@@ -52,7 +52,7 @@ export function PaymentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 md:p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm animate-fadeIn">
       {/* Backdrop de Fechamento al clicar fora */}
       <div className="absolute inset-0" onClick={onClose} />
 
