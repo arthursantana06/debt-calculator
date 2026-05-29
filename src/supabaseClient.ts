@@ -1,17 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Função para buscar credenciais dinâmicas do .env ou localStorage
 export const getSupabaseConfig = () => {
   const envUrl = import.meta.env.VITE_SUPABASE_URL;
   const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   
-  if (
-    envUrl && 
-    envKey && 
-    envUrl !== 'SEU_SUPABASE_URL' && 
-    envUrl !== 'SEU_SUPABASE_URL_AQUI' && 
-    envUrl.trim() !== ''
-  ) {
+  const isPlaceholderUrl = !envUrl || 
+    envUrl === 'SEU_SUPABASE_URL' || 
+    envUrl === 'SEU_SUPABASE_URL_AQUI' || 
+    envUrl.trim() === '';
+    
+  const isPlaceholderKey = !envKey || 
+    envKey === 'COLE_SUA_ANON_KEY_AQUI' || 
+    envKey === 'SEU_SUPABASE_ANON_KEY' || 
+    envKey.trim() === '';
+  
+  if (!isPlaceholderUrl && !isPlaceholderKey) {
     return { url: envUrl, key: envKey, source: 'env' };
   }
   
