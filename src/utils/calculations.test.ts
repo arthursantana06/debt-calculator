@@ -1,4 +1,10 @@
-import { calculateDebtDetails, calculateTotalSummary, parseLocalDate } from './calculations';
+import {
+  buildDebtMutations,
+  calculateDebtDetails,
+  calculateTotalSummary,
+  groupPaymentsIntoEvents,
+  parseLocalDate,
+} from './calculations';
 import type { Debt, Payment } from './calculations';
 
 /**
@@ -60,6 +66,17 @@ const debtSimples: Debt = {
 
 function pagamento(id: string, idDivida: string, data: string, valor: number): Payment {
   return { id, id_divida: idDivida, created_at: `${data}T00:00:00Z`, data_pagamento: data, valor };
+}
+
+/** Pagamento com instante de inserção explícito, para testar o agrupamento. */
+function pagamentoEm(
+  id: string,
+  idDivida: string,
+  data: string,
+  valor: number,
+  createdAt: string
+): Payment {
+  return { id, id_divida: idDivida, created_at: createdAt, data_pagamento: data, valor };
 }
 
 export function runMathTests() {
@@ -145,6 +162,56 @@ export function runMathTests() {
     round2(resumo.totalOriginal + resumo.totalJuros - resumo.totalAmortizado),
     resumo.saldoTotal,
     0.02
+  );
+
+  // 8. Agrupamento do histórico: um abatimento repartido é UM evento.
+  //    O que une as linhas é o lote de inserção, não a data isolada.
+  const LOTE_A = '2026-07-28T14:00:00.000Z';
+  const LOTE_B = '2026-07-28T19:30:00.000Z';
+  const linhas = [
+    // Um pagamento de R$ 300 repartido entre as duas dívidas.
+    pagamentoEm('g-1', debtCompostos.id, DATA_CEDO, 200, LOTE_A),
+    pagamentoEm('g-2', debtSimples.id, DATA_CEDO, 100, `${LOTE_A.slice(0, 19)}.180Z`),
+    // Outro pagamento, no MESMO dia, horas depois — evento distinto.
+    pagamentoEm('g-3', debtCompostos.id, DATA_CEDO, 50, LOTE_B),
+    // E um em outro dia.
+    pagamentoEm('g-4', debtCompostos.id, DATA_TARDE, 75, `${DATA_TARDE}T10:00:00Z`),
+  ];
+  const eventos = groupPaymentsIntoEvents(linhas, [debtCompostos, debtSimples]);
+  console.log('\n[8] Agrupamento do histórico de abatimentos');
+  check('Eventos formados', eventos.length, 3);
+  check('Mais recente primeiro', eventos[0].data_pagamento, DATA_TARDE);
+  const repartido = eventos.find((e) => e.alocacoes.length > 1);
+  check('Evento repartido encontrado', Boolean(repartido), true);
+  check('Dívidas no evento repartido', repartido ? repartido.alocacoes.length : 0, 2);
+  check('Total do evento repartido', repartido ? repartido.valorTotal : 0, 300);
+  check(
+    'Mesmo dia, lotes distintos não se fundem',
+    eventos.filter((e) => e.data_pagamento === DATA_CEDO).length,
+    2
+  );
+  check(
+    'Nenhuma linha se perde no agrupamento',
+    eventos.reduce((s, e) => s + e.alocacoes.length, 0),
+    linhas.length
+  );
+
+  // 9. Histórico de mutação: saldo após cada abatimento, e qual deles quitou.
+  const mutacoes = buildDebtMutations(debtCompostos, [
+    pagamento('m-1', debtCompostos.id, DATA_CEDO, 500),
+    pagamento('m-2', debtCompostos.id, DATA_QUITA, 5000),
+  ]);
+  console.log('\n[9] Histórico de mutação de uma dívida');
+  check('Mutações registradas', mutacoes.length, 2);
+  check('Ordem cronológica', mutacoes[0].data, DATA_CEDO);
+  check('Primeiro abatimento não quita', mutacoes[0].quitou, false);
+  check('Saldo após o primeiro bate com o motor', mutacoes[0].saldoApos, round2(saldoNoPagamento - 500));
+  check('Segundo abatimento quita', mutacoes[1].quitou, true);
+  check('Saldo final zerado', mutacoes[1].saldoApos, 0);
+  check(
+    'Valor aplicado limitado ao saldo da data',
+    mutacoes[1].valor,
+    round2((saldoNoPagamento - 500) * fator(10, dias(DATA_CEDO, DATA_QUITA)))
   );
 
   console.log(

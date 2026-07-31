@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Calendar, Trash2, Coins } from 'lucide-react';
+import { Calendar, Trash2, Coins, CornerDownRight } from 'lucide-react';
+import { groupPaymentsIntoEvents } from '../utils/calculations';
 import type { Payment, Debt } from '../utils/calculations';
 
 interface GlobalPaymentsListProps {
@@ -9,7 +10,7 @@ interface GlobalPaymentsListProps {
 }
 
 export function GlobalPaymentsList({ debts, payments, onDeletePayment }: GlobalPaymentsListProps) {
-  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -25,26 +26,36 @@ export function GlobalPaymentsList({ debts, payments, onDeletePayment }: GlobalP
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Deseja excluir este abatimento permanentemente?')) {
-      setLoadingId(id);
-      try {
+  // Um abatimento repartido entre várias dívidas vira um único card.
+  const eventos = groupPaymentsIntoEvents(payments, debts);
+
+  const removerLinhas = async (chave: string, ids: string[]) => {
+    setLoadingKey(chave);
+    try {
+      for (const id of ids) {
         await onDeletePayment(id);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoadingId(null);
       }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingKey(null);
     }
   };
 
-  // Ordena os abatimentos mais recentes primeiro
-  const sortedPayments = [...payments].sort((a, b) => new Date(b.data_pagamento).getTime() - new Date(a.data_pagamento).getTime());
+  const handleDeleteEvent = async (chave: string, ids: string[]) => {
+    const pergunta =
+      ids.length > 1
+        ? `Este abatimento foi repartido entre ${ids.length} dívidas. Deseja excluí-lo por inteiro?`
+        : 'Deseja excluir este abatimento permanentemente?';
+    if (window.confirm(pergunta)) {
+      await removerLinhas(chave, ids);
+    }
+  };
 
-  // Busca a descrição da dívida vinculada
-  const getDebtDescription = (idDivida: string) => {
-    const debt = debts.find((d) => d.id === idDivida);
-    return debt ? debt.descricao : 'Abatimento Geral';
+  const handleDeleteAllocation = async (id: string, descricao: string) => {
+    if (window.confirm(`Deseja excluir apenas a parcela dirigida a "${descricao}"?`)) {
+      await removerLinhas(id, [id]);
+    }
   };
 
   return (
@@ -53,43 +64,81 @@ export function GlobalPaymentsList({ debts, payments, onDeletePayment }: GlobalP
       <div className="flex items-center justify-between border-b border-zinc-900 pb-2.5">
         <h4 className="font-semibold text-xs uppercase tracking-wider text-zinc-400">Histórico de Abatimentos</h4>
         <span className="text-[9px] uppercase tracking-wider font-semibold text-zinc-650 bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-900 font-mono">
-          Total: {payments.length}
+          Total: {eventos.length}
         </span>
       </div>
 
-      {sortedPayments.length > 0 ? (
+      {eventos.length > 0 ? (
         <div className="grid grid-cols-1 gap-2">
-          {sortedPayments.map((pay) => {
-            const debtDesc = getDebtDescription(pay.id_divida);
+          {eventos.map((ev) => {
+            const ids = ev.alocacoes.map((a) => a.id);
+            const repartido = ev.alocacoes.length > 1;
+            const ocupado = loadingKey === ev.key || ids.some((id) => loadingKey === id);
+
             return (
               <div
-                key={pay.id}
-                className="flex items-center justify-between p-3.5 bg-zinc-900/5 border border-zinc-900 rounded-lg text-xs hover:bg-zinc-900/10 transition duration-150 animate-fadeIn"
+                key={ev.key}
+                className="p-3.5 bg-zinc-900/5 border border-zinc-900 rounded-lg text-xs hover:bg-zinc-900/10 transition duration-150 animate-fadeIn"
               >
-                <div className="space-y-1 max-w-[70%]">
-                  <h5 className="font-semibold text-zinc-200 truncate leading-snug flex items-center gap-1.5">
-                    <Coins className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
-                    {debtDesc}
-                  </h5>
-                  <div className="flex items-center gap-1 text-[10px] text-zinc-550">
-                    <Calendar className="w-3 h-3 text-zinc-650" />
-                    <span>{formatDate(pay.data_pagamento)}</span>
+                {/* Cabeçalho do abatimento: data, total e exclusão do evento inteiro */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-1 min-w-0">
+                    <h5 className="font-semibold text-zinc-200 leading-snug flex items-center gap-1.5">
+                      <Coins className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+                      Abatimento
+                      {repartido && (
+                        <span className="text-[9px] font-medium text-zinc-500 bg-zinc-900 border border-zinc-850 px-1 py-0.5 rounded">
+                          {ev.alocacoes.length} dívidas
+                        </span>
+                      )}
+                    </h5>
+                    <div className="flex items-center gap-1 text-[10px] text-zinc-550">
+                      <Calendar className="w-3 h-3 text-zinc-650" />
+                      <span>{formatDate(ev.data_pagamento)}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="font-semibold font-mono tabular-nums text-zinc-300">
+                      -{formatCurrency(ev.valorTotal)}
+                    </span>
+
+                    <button
+                      onClick={() => handleDeleteEvent(ev.key, ids)}
+                      disabled={ocupado}
+                      className="p-1 text-zinc-650 hover:text-zinc-350 disabled:opacity-30 transition-colors cursor-pointer"
+                      title={repartido ? 'Remover o abatimento inteiro' : 'Remover Abatimento'}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-                
-                <div className="flex items-center gap-3">
-                  <span className="font-semibold font-mono tabular-nums text-zinc-300">
-                    -{formatCurrency(Number(pay.valor))}
-                  </span>
-                  
-                  <button
-                    onClick={() => handleDelete(pay.id)}
-                    disabled={loadingId === pay.id}
-                    className="p-1 text-zinc-650 hover:text-zinc-350 disabled:opacity-30 transition-colors cursor-pointer"
-                    title="Remover Abatimento"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+
+                {/* Dívidas abatidas por este pagamento */}
+                <div className="mt-2.5 pt-2.5 border-t border-zinc-900/80 space-y-1.5">
+                  {ev.alocacoes.map((aloc) => (
+                    <div key={aloc.id} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="flex items-center gap-1.5 min-w-0 text-zinc-450">
+                        <CornerDownRight className="w-3 h-3 text-zinc-700 flex-shrink-0" />
+                        <span className="truncate">{aloc.descricao}</span>
+                      </span>
+                      <span className="flex items-center gap-2 flex-shrink-0">
+                        <span className="font-mono tabular-nums text-zinc-400">
+                          -{formatCurrency(aloc.valor)}
+                        </span>
+                        {repartido && (
+                          <button
+                            onClick={() => handleDeleteAllocation(aloc.id, aloc.descricao)}
+                            disabled={ocupado}
+                            className="p-0.5 text-zinc-750 hover:text-zinc-450 disabled:opacity-30 transition-colors cursor-pointer"
+                            title="Remover apenas esta parcela"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             );

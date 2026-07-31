@@ -183,6 +183,155 @@ export function calculateDebtDetails(
   };
 }
 
+/** Uma parcela de um abatimento, dirigida a uma dívida específica. */
+export interface PaymentAllocation {
+  /** id da linha em `abatimentos` — é esta que se exclui. */
+  id: string;
+  id_divida: string;
+  /** Descrição da dívida abatida, ou um rótulo neutro se ela já não existe. */
+  descricao: string;
+  valor: number;
+}
+
+/**
+ * Um abatimento como o usuário o fez: um único pagamento, possivelmente
+ * repartido entre várias dívidas.
+ */
+export interface PaymentEvent {
+  /** Chave estável derivada da data e do lote de inserção. */
+  key: string;
+  data_pagamento: string;
+  valorTotal: number;
+  alocacoes: PaymentAllocation[];
+}
+
+/** Tolerância, em ms, para considerar duas linhas parte do mesmo lote. */
+const JANELA_LOTE_MS = 5000;
+
+/**
+ * Reagrupa as linhas de `abatimentos` nos pagamentos que as originaram.
+ *
+ * Um abatimento repartido entre N dívidas vira N linhas na tabela, sem nenhuma
+ * coluna que as ligue. O que as une é o lote de inserção: no Postgres todas
+ * compartilham o `created_at` da transação, e no mock local caem a poucos
+ * milissegundos umas das outras. Agrupa-se, então, por data de pagamento mais
+ * proximidade de `created_at`.
+ */
+export function groupPaymentsIntoEvents(payments: Payment[], debts: Debt[]): PaymentEvent[] {
+  const descricaoDe = (idDivida: string) =>
+    debts.find((d) => d.id === idDivida)?.descricao ?? 'Dívida removida';
+
+  const instanteDe = (pay: Payment) => {
+    const t = pay.created_at ? new Date(pay.created_at).getTime() : NaN;
+    return Number.isNaN(t) ? 0 : t;
+  };
+
+  // Agrupa primeiro por data de pagamento; dentro dela, por lote de inserção.
+  const porData = new Map<string, Payment[]>();
+  payments.forEach((pay) => {
+    const lista = porData.get(pay.data_pagamento) || [];
+    lista.push(pay);
+    porData.set(pay.data_pagamento, lista);
+  });
+
+  const eventos: PaymentEvent[] = [];
+
+  porData.forEach((linhas, data) => {
+    const ordenadas = [...linhas].sort((a, b) => instanteDe(a) - instanteDe(b));
+
+    let lote: Payment[] = [];
+    const fecharLote = () => {
+      if (lote.length === 0) return;
+      const alocacoes = lote.map((pay) => ({
+        id: pay.id,
+        id_divida: pay.id_divida,
+        descricao: descricaoDe(pay.id_divida),
+        valor: Number(pay.valor) || 0,
+      }));
+      eventos.push({
+        key: `${data}-${lote[0].id}`,
+        data_pagamento: data,
+        valorTotal: Math.round(alocacoes.reduce((s, a) => s + a.valor, 0) * 100) / 100,
+        alocacoes,
+      });
+      lote = [];
+    };
+
+    ordenadas.forEach((pay) => {
+      const anterior = lote[lote.length - 1];
+      const mesmoLote = anterior && Math.abs(instanteDe(pay) - instanteDe(anterior)) <= JANELA_LOTE_MS;
+      // Uma dívida repetida no mesmo lote indica dois pagamentos distintos.
+      const jaNoLote = lote.some((p) => p.id_divida === pay.id_divida);
+
+      if (!mesmoLote || jaNoLote) fecharLote();
+      lote.push(pay);
+    });
+
+    fecharLote();
+  });
+
+  return eventos.sort(
+    (a, b) => parseLocalDate(b.data_pagamento).getTime() - parseLocalDate(a.data_pagamento).getTime()
+  );
+}
+
+/** Um abatimento na linha do tempo de uma dívida. */
+export interface DebtMutation {
+  id: string;
+  data: string;
+  /** Valor efetivamente aplicado — nunca maior que o saldo daquela data. */
+  valor: number;
+  /** Saldo devedor logo após o abatimento. */
+  saldoApos: number;
+  /** true quando foi este abatimento que zerou a dívida. */
+  quitou: boolean;
+}
+
+/**
+ * Histórico de mutações de uma dívida: cada abatimento, em ordem cronológica,
+ * com o saldo que restou depois dele. Reexecuta a mesma linha do tempo de
+ * `calculateDebtDetails`, para que os valores exibidos batam com o saldo.
+ */
+export function buildDebtMutations(debt: Debt, payments: Payment[]): DebtMutation[] {
+  const dInicio = startOfDay(parseLocalDate(debt.data_divida));
+
+  const eventos = payments
+    .filter((pay) => pay.id_divida === debt.id)
+    .map((pay) => {
+      const d = startOfDay(parseLocalDate(pay.data_pagamento));
+      return {
+        id: pay.id,
+        data: pay.data_pagamento,
+        quando: d.getTime() < dInicio.getTime() ? dInicio : d,
+        valor: Number(pay.valor) || 0,
+      };
+    })
+    .sort((a, b) => a.quando.getTime() - b.quando.getTime());
+
+  let saldo = debt.valor_inicial;
+  let cursor = dInicio;
+  const mutacoes: DebtMutation[] = [];
+
+  for (const ev of eventos) {
+    saldo += accrueInterest(saldo, debt, cursor, ev.quando);
+
+    const aplicado = Math.min(saldo, ev.valor);
+    saldo -= aplicado;
+    cursor = ev.quando;
+
+    const saldoApos = Math.max(0, Math.round(saldo * 100) / 100);
+    mutacoes.push({
+      id: ev.id,
+      data: ev.data,
+      valor: Math.round(aplicado * 100) / 100,
+      saldoApos,
+      quitou: saldoApos <= 0.01,
+    });
+  }
+
+  return mutacoes;
+}
+
 /**
  * Calcula o saldo atualizado total combinando todas as dívidas e pagamentos
  * em uma data de referência. Dívidas ainda não vigentes são ignoradas.

@@ -1,6 +1,9 @@
-import { Calendar, ChevronRight } from 'lucide-react';
-import { calculateDebtDetails } from '../utils/calculations';
+import { Calendar, ChevronRight, CornerDownRight } from 'lucide-react';
+import { buildDebtMutations, calculateDebtDetails } from '../utils/calculations';
 import type { Debt, Payment } from '../utils/calculations';
+
+/** Quantas mutações aparecem no card antes de o restante virar um resumo. */
+const MUTACOES_VISIVEIS = 3;
 
 interface DebtItemProps {
   debt: Debt;
@@ -10,6 +13,11 @@ interface DebtItemProps {
 
 export function DebtItem({ debt, payments, onClick }: DebtItemProps) {
   const details = calculateDebtDetails(debt, payments);
+
+  // Histórico de mutação: as mais recentes primeiro, como no resto do app.
+  const mutacoes = buildDebtMutations(debt, payments).reverse();
+  const visiveis = mutacoes.slice(0, MUTACOES_VISIVEIS);
+  const ocultas = mutacoes.length - visiveis.length;
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -88,6 +96,32 @@ export function DebtItem({ debt, payments, onClick }: DebtItemProps) {
           </span>
         </div>
       </div>
+
+      {/* Histórico de mutação: quando esta dívida foi abatida */}
+      {mutacoes.length > 0 && (
+        <div className="space-y-1 pb-2 mb-1 border-b border-zinc-900/80">
+          <span className="text-[9px] uppercase tracking-wider font-semibold text-zinc-650 block">
+            Abatimentos
+          </span>
+          {visiveis.map((mut) => (
+            <div key={mut.id} className="flex items-center justify-between gap-2 text-[10px]">
+              <span className="flex items-center gap-1.5 text-zinc-500">
+                <CornerDownRight className="w-3 h-3 text-zinc-700 flex-shrink-0" />
+                <span className="font-mono tabular-nums">{formatDate(mut.data)}</span>
+                <span className="text-zinc-650">{mut.quitou ? 'quitação' : 'parcial'}</span>
+              </span>
+              <span className="font-mono tabular-nums text-zinc-450 flex-shrink-0">
+                -{formatCurrency(mut.valor)}
+              </span>
+            </div>
+          ))}
+          {ocultas > 0 && (
+            <span className="text-[9px] text-zinc-650 block pl-4.5">
+              + {ocultas} {ocultas === 1 ? 'abatimento anterior' : 'abatimentos anteriores'}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Saldo Devedor Atual */}
       <div className="flex items-center justify-between pt-1">
