@@ -43,6 +43,11 @@ export function DebtItem({ debt, payments, onClick }: DebtItemProps) {
             <h4 className="font-semibold text-xs transition text-zinc-200 group-hover:text-white">
               {debt.descricao}
             </h4>
+            {!details.vigente && (
+              <span className="text-[9px] font-medium text-zinc-500 bg-zinc-900 border border-zinc-850 px-1 py-0.5 rounded">
+                Ainda não iniciada
+              </span>
+            )}
             {debt.taxa_juros > 0 && (
               <span className="text-[9px] font-medium font-mono text-zinc-400 bg-zinc-900 border border-zinc-850 px-1 py-0.5 rounded flex items-center gap-0.5">
                 {debt.taxa_juros}% {getPeriodLabel(debt.periodo_juros)}

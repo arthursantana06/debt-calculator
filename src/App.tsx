@@ -9,7 +9,8 @@ import { SetupInstructions } from './components/SetupInstructions';
 import { NotesSection } from './components/NotesSection';
 import { PaymentForm } from './components/PaymentForm';
 import { GlobalPaymentsList } from './components/GlobalPaymentsList';
-import { Scale, ShieldCheck, Loader2 } from 'lucide-react';
+import { FlowSimulator } from './components/FlowSimulator';
+import { Scale, ShieldCheck, Loader2, FlaskConical, ListOrdered } from 'lucide-react';
 import { runMathTests } from './utils/calculations.test';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
+  const [simulatorTab, setSimulatorTab] = useState<'calendario' | 'fluxo' | null>(null);
 
   // Executa testes matemáticos de comprovação no console para verificação
   useEffect(() => {
@@ -237,6 +239,24 @@ function App() {
             <div className="grid grid-cols-1 gap-4 px-4 mb-4">
               <DebtForm onAddDebt={handleAddDebt} />
               <PaymentForm debts={debts} payments={payments} onAddPayment={handleAddAllocatedPayments} />
+
+              {/* Projeções: calendário de simulação e fluxo em lista */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setSimulatorTab('calendario')}
+                  className="flex items-center justify-center gap-1.5 py-3 bg-zinc-900/20 hover:bg-zinc-900 border border-zinc-900 text-zinc-400 hover:text-zinc-200 font-bold rounded-xl transition duration-150 cursor-pointer text-[10px] uppercase tracking-wider"
+                >
+                  <FlaskConical className="w-3.5 h-3.5" />
+                  Simular Fluxo
+                </button>
+                <button
+                  onClick={() => setSimulatorTab('fluxo')}
+                  className="flex items-center justify-center gap-1.5 py-3 bg-zinc-900/20 hover:bg-zinc-900 border border-zinc-900 text-zinc-400 hover:text-zinc-200 font-bold rounded-xl transition duration-150 cursor-pointer text-[10px] uppercase tracking-wider"
+                >
+                  <ListOrdered className="w-3.5 h-3.5" />
+                  Fluxo Simplificado
+                </button>
+              </div>
             </div>
 
             {/* Listas cronológicas */}
@@ -255,6 +275,16 @@ function App() {
           </>
         )}
       </main>
+
+      {/* Simulador de Fluxo (calendário + fluxo simplificado) */}
+      {simulatorTab && (
+        <FlowSimulator
+          debts={debts}
+          payments={payments}
+          initialTab={simulatorTab}
+          onClose={() => setSimulatorTab(null)}
+        />
+      )}
 
       {/* Modal de Abatimentos / Drawer */}
       {selectedDebt && (

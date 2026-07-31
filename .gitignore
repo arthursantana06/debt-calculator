@@ -15,6 +15,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Skills baixadas — reproduzíveis a partir de skills-lock.json
+.agents/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
