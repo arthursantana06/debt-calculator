@@ -119,13 +119,15 @@ export function DebtList({ debts, payments, onSelectDebt }: DebtListProps) {
       {/* Dívidas arquivadas — fora do fluxo principal, atrás de um link */}
       {arquivadas.length > 0 && (
         <div className="pt-1 pb-8 space-y-3.5">
-          <button
-            onClick={() => setMostrarArquivadas((v) => !v)}
-            className="flex items-center gap-1.5 text-[10px] text-zinc-650 hover:text-zinc-400 transition-colors cursor-pointer underline underline-offset-4 decoration-zinc-800 hover:decoration-zinc-600"
-          >
-            <Archive className="w-3 h-3" />
-            {mostrarArquivadas ? 'Ocultar' : 'Ver'} dívidas arquivadas ({arquivadas.length})
-          </button>
+          <div className="flex justify-center">
+            <button
+              onClick={() => setMostrarArquivadas((v) => !v)}
+              className="flex items-center gap-1.5 text-[10px] text-zinc-650 hover:text-zinc-400 transition-colors cursor-pointer underline underline-offset-4 decoration-zinc-800 hover:decoration-zinc-600"
+            >
+              <Archive className="w-3 h-3" />
+              {mostrarArquivadas ? 'Ocultar' : 'Ver'} dívidas arquivadas ({arquivadas.length})
+            </button>
+          </div>
 
           {mostrarArquivadas &&
             arquivadas.map((debt) => (
