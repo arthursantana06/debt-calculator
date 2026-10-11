@@ -12,7 +12,7 @@ import { PaymentForm } from './components/PaymentForm';
 import { GlobalPaymentsList } from './components/GlobalPaymentsList';
 import { FlowSimulator } from './components/FlowSimulator';
 import { SavedFlowsList } from './components/SavedFlowsList';
-import { Scale, ShieldCheck, Loader2, FlaskConical, ListOrdered, LineChart } from 'lucide-react';
+import { Scale, Loader2, FlaskConical, ListOrdered, LineChart, Plus } from 'lucide-react';
 import { runMathTests } from './utils/calculations.test';
 
 // Os gráficos só são baixados quando o painel é aberto.
@@ -27,6 +27,9 @@ function App() {
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
   const [simulatorTab, setSimulatorTab] = useState<'calendario' | 'fluxo' | null>(null);
   const [rentabilidadeAberta, setRentabilidadeAberta] = useState(false);
+  /** Formulário aberto pelo cabeçalho — um por vez; clicar de novo fecha. */
+  const [formAberto, setFormAberto] = useState<'divida' | 'abatimento' | null>(null);
+  const alternarForm = (qual: 'divida' | 'abatimento') => setFormAberto((atual) => (atual === qual ? null : qual));
   const [flows, setFlows] = useState<SavedFlow[]>([]);
   const [flowsIndisponiveis, setFlowsIndisponiveis] = useState(false);
   /** Fluxo salvo aberto no simulador; null = simulação nova. */
@@ -290,29 +293,45 @@ function App() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center overflow-x-hidden">
       {/* Header Container */}
       <header className="w-full max-w-[28rem] px-4 pt-6 pb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="p-2 border border-zinc-900 bg-zinc-900/15 rounded-lg">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* No celular o ícone e o subtítulo saem, para os botões caberem ao lado do título */}
+          <div className="hidden sm:block p-2 border border-zinc-900 bg-zinc-900/15 rounded-lg">
             <Scale className="w-4 h-4 text-zinc-400" />
           </div>
-          <div>
-            <h1 className="text-xs font-bold uppercase tracking-wider text-zinc-200 leading-none flex items-center gap-1.5">
+          <div className="min-w-0">
+            <h1 className="text-xs font-bold uppercase tracking-wider text-zinc-200 leading-none whitespace-nowrap">
               Acerto de Contas
             </h1>
-            <p className="text-[10px] text-zinc-500 mt-1 font-medium leading-none">Controle financeiro em tempo real</p>
+            <p className="hidden sm:block text-[10px] text-zinc-500 mt-1 font-medium leading-none">
+              Controle financeiro em tempo real
+            </p>
           </div>
         </div>
 
-        {/* Supabase status indicator */}
-        <div className="flex items-center">
-          {isSupabaseConfigured ? (
-            <span className="text-[9px] uppercase tracking-wider font-semibold text-zinc-400 border border-zinc-900 bg-zinc-900/15 px-2 py-1 rounded flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-zinc-450" /> Cloud
-            </span>
-          ) : (
-            <span className="text-[9px] uppercase tracking-wider font-semibold text-zinc-500 border border-zinc-900/50 bg-zinc-950/20 px-2 py-1 rounded">
-              Offline
-            </span>
-          )}
+        {/* Ações principais: registrar dívida e abatimento */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => alternarForm('divida')}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+              formAberto === 'divida'
+                ? 'bg-zinc-300 text-zinc-950'
+                : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-950'
+            }`}
+            aria-expanded={formAberto === 'divida'}
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" /> Dívida
+          </button>
+          <button
+            onClick={() => alternarForm('abatimento')}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+              formAberto === 'abatimento'
+                ? 'bg-zinc-800 border-zinc-700 text-zinc-100'
+                : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
+            }`}
+            aria-expanded={formAberto === 'abatimento'}
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" /> Abatimento
+          </button>
         </div>
       </header>
 
@@ -325,6 +344,20 @@ function App() {
           </div>
         ) : (
           <>
+            {/* Formulários abertos pelos botões do cabeçalho, logo abaixo dele */}
+            {formAberto && (
+              <div className="px-4 mb-4">
+                <DebtForm isOpen={formAberto === 'divida'} onClose={() => setFormAberto(null)} onAddDebt={handleAddDebt} />
+                <PaymentForm
+                  isOpen={formAberto === 'abatimento'}
+                  onClose={() => setFormAberto(null)}
+                  debts={debts}
+                  payments={payments}
+                  onAddPayment={handleAddAllocatedPayments}
+                />
+              </div>
+            )}
+
             {/* Dashboard no topo */}
             <Dashboard debts={debts} payments={payments} />
 
@@ -334,11 +367,7 @@ function App() {
             {/* Seção de Anotações */}
             <NotesSection />
 
-            {/* Formulários de Dívida e Abatimento lado a lado */}
             <div className="grid grid-cols-1 gap-4 px-4 mb-4">
-              <DebtForm onAddDebt={handleAddDebt} />
-              <PaymentForm debts={debts} payments={payments} onAddPayment={handleAddAllocatedPayments} />
-
               {/* Projeções: calendário de simulação e fluxo em lista */}
               <div className="grid grid-cols-2 gap-2">
                 <button
