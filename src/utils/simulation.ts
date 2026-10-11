@@ -7,7 +7,14 @@
  * que o fluxo é aberto, nunca uma fotografia do dia em que foi salvo.
  */
 
-import { calculateDebtDetails, calculateTotalSummary, parseLocalDate, startOfDay, toDateKey } from './calculations';
+import {
+  calculateDebtDetails,
+  calculateTotalSummary,
+  groupPaymentsIntoEvents,
+  parseLocalDate,
+  startOfDay,
+  toDateKey,
+} from './calculations';
 import type { Debt, Payment } from './calculations';
 
 /** Marca que distingue uma mutação simulada de um registro real. */
@@ -65,6 +72,8 @@ export interface FlowEntry {
   simulado: boolean;
   /** Saldo devedor total logo após o evento. */
   saldoApos: number;
+  /** Abatimento repartido: uma parcela por dívida. Ausente quando há uma só. */
+  alocacoes?: { descricao: string; valor: number }[];
 }
 
 /** Saldo devedor consolidado numa data qualquer. */
@@ -180,17 +189,25 @@ export function buildFlowEntries(debts: Debt[], payments: Payment[], ate: Date):
     });
   });
 
-  payments.forEach((pay) => {
-    if (startOfDay(parseLocalDate(pay.data_pagamento)).getTime() > limite) return;
-    const alvo = debts.find((d) => d.id === pay.id_divida);
-    eventos.push({
-      id: pay.id,
-      tipo: 'abatimento',
-      data: pay.data_pagamento,
-      // Sem alvo, o abatimento não altera saldo nenhum — dizer por quê.
-      descricao: alvo ? `Abatimento — ${alvo.descricao}` : 'Abatimento — dívida removida',
-      valor: -Number(pay.valor),
-      simulado: isSimulated(pay.id),
+  // Um pagamento repartido entre N dívidas vira um único evento, como no
+  // Histórico de Abatimentos. Reais e simulados são agrupados em separado
+  // para que um lote nunca misture os dois.
+  const ocorridos = payments.filter((pay) => startOfDay(parseLocalDate(pay.data_pagamento)).getTime() <= limite);
+  [ocorridos.filter((p) => !isSimulated(p.id)), ocorridos.filter((p) => isSimulated(p.id))].forEach((grupo) => {
+    groupPaymentsIntoEvents(grupo, debts).forEach((ev) => {
+      const unica = ev.alocacoes.length === 1;
+      eventos.push({
+        id: ev.key,
+        tipo: 'abatimento',
+        data: ev.data_pagamento,
+        // Sem alvo, o abatimento não altera saldo nenhum — dizer por quê.
+        descricao: unica
+          ? `Abatimento — ${debts.some((d) => d.id === ev.alocacoes[0].id_divida) ? ev.alocacoes[0].descricao : 'dívida removida'}`
+          : 'Abatimento',
+        valor: -ev.valorTotal,
+        simulado: isSimulated(ev.alocacoes[0].id),
+        alocacoes: unica ? undefined : ev.alocacoes.map((a) => ({ descricao: a.descricao, valor: a.valor })),
+      });
     });
   });
 

@@ -17,6 +17,7 @@ import {
   FlaskConical,
   Save,
   Loader2,
+  CornerDownRight,
 } from 'lucide-react';
 import { calculateTotalSummary, parseLocalDate, toDateKey } from '../utils/calculations';
 import type { Debt, Payment } from '../utils/calculations';
@@ -576,33 +577,52 @@ function FlowList({ debts, payments, ate }: { debts: Debt[]; payments: Payment[]
       {entries.length > 0 ? (
         <div className="space-y-1.5">
           {entries.map((e) => (
-            <div
-              key={e.id}
-              className="flex items-center justify-between p-3 bg-zinc-900/5 border border-zinc-900 rounded-lg text-[11px]"
-            >
-              <div className="min-w-0 space-y-0.5">
-                <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
-                  {e.tipo === 'divida' ? (
-                    <TrendingUp className="w-3 h-3 text-zinc-500 flex-shrink-0" />
-                  ) : (
-                    <Coins className="w-3 h-3 text-zinc-500 flex-shrink-0" />
-                  )}
-                  <span className="truncate">{e.descricao}</span>
-                  {e.simulado && (
-                    <span className="text-[8px] uppercase tracking-wider font-bold text-zinc-950 bg-zinc-400 px-1 py-0.5 rounded flex-shrink-0">
-                      sim
-                    </span>
-                  )}
-                </span>
-                <span className="text-[9px] text-zinc-550 block">
-                  {formatDate(e.data)} · saldo após:{' '}
-                  <span className="font-mono">{formatCurrency(e.saldoApos)}</span>
+            <div key={e.id} className="p-3 bg-zinc-900/5 border border-zinc-900 rounded-lg text-[11px]">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 space-y-0.5">
+                  <span className="font-semibold text-zinc-200 flex items-center gap-1.5">
+                    {e.tipo === 'divida' ? (
+                      <TrendingUp className="w-3 h-3 text-zinc-500 flex-shrink-0" />
+                    ) : (
+                      <Coins className="w-3 h-3 text-zinc-500 flex-shrink-0" />
+                    )}
+                    <span className="truncate">{e.descricao}</span>
+                    {e.alocacoes && (
+                      <span className="text-[9px] font-medium text-zinc-500 bg-zinc-900 border border-zinc-850 px-1 py-0.5 rounded flex-shrink-0">
+                        {e.alocacoes.length} dívidas
+                      </span>
+                    )}
+                    {e.simulado && (
+                      <span className="text-[8px] uppercase tracking-wider font-bold text-zinc-950 bg-zinc-400 px-1 py-0.5 rounded flex-shrink-0">
+                        sim
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[9px] text-zinc-550 block">
+                    {formatDate(e.data)} · saldo após:{' '}
+                    <span className="font-mono">{formatCurrency(e.saldoApos)}</span>
+                  </span>
+                </div>
+                <span className="font-semibold font-mono tabular-nums text-zinc-300 flex-shrink-0 ml-2">
+                  {e.valor > 0 ? '+' : '-'}
+                  {formatCurrency(Math.abs(e.valor))}
                 </span>
               </div>
-              <span className="font-semibold font-mono tabular-nums text-zinc-300 flex-shrink-0 ml-2">
-                {e.valor > 0 ? '+' : '-'}
-                {formatCurrency(Math.abs(e.valor))}
-              </span>
+
+              {/* Abatimento repartido: as dívidas que ele atingiu, como no histórico */}
+              {e.alocacoes && (
+                <div className="mt-2.5 pt-2.5 border-t border-zinc-900/80 space-y-1.5">
+                  {e.alocacoes.map((a, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="flex items-center gap-1.5 min-w-0 text-zinc-450">
+                        <CornerDownRight className="w-3 h-3 text-zinc-700 flex-shrink-0" />
+                        <span className="truncate">{a.descricao}</span>
+                      </span>
+                      <span className="font-mono tabular-nums text-zinc-400 flex-shrink-0">-{formatCurrency(a.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

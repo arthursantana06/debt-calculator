@@ -226,6 +226,14 @@ function PlannedRow({ entry }: { entry: PlannedEntry }) {
             <Coins className="w-3 h-3 text-zinc-500 flex-shrink-0" />
           )}
           <span className="truncate">{entry.descricao}</span>
+          {entry.alocacoes && (
+            <span
+              className="text-[9px] font-medium text-zinc-500 bg-zinc-900 border border-zinc-850 px-1 py-0.5 rounded flex-shrink-0"
+              title={entry.alocacoes.map((a) => a.descricao).join(', ')}
+            >
+              {entry.alocacoes.length} dívidas
+            </span>
+          )}
         </span>
         <span className="text-[9px] text-zinc-550 block">
           {formatDate(entry.data)} · saldo após: <span className="font-mono">{formatCurrency(entry.saldoApos)}</span>
