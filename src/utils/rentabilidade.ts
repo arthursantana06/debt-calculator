@@ -350,6 +350,105 @@ export function trajetoriaSaldo(
   });
 }
 
+export interface PontoEquilibrio {
+  data: string;
+  /** Capital inicial acumulado até a data. */
+  inicial: number;
+  /** Abatido acumulado (valor efetivamente aplicado). */
+  abatido: number;
+  /** Inicial + juros acumulados — o mesmo que abatido + saldo em aberto. */
+  devido: number;
+}
+
+export interface Equilibrio {
+  pontos: PontoEquilibrio[];
+  /** Quando o abatido alcançou o inicial pela última vez, se hoje está acima dele. */
+  atingidoEm: string | null;
+  /** Só existe enquanto o equilíbrio não foi atingido. */
+  projecao: {
+    /** Inicial − abatido, hoje. */
+    falta: number;
+    /** Ritmo médio de abatimento na janela recente, em R$/mês. */
+    ritmoMensal: number;
+    /** Data estimada no ritmo atual; null se não há ritmo ou passa de 20 anos. */
+    data: string | null;
+  } | null;
+}
+
+/** Janela usada para medir o ritmo recente de abatimentos. */
+export const JANELA_RITMO_DIAS = 180;
+
+/**
+ * Inicial × abatido acumulados no tempo. O ponto de equilíbrio é quando o
+ * abatido alcança o capital inicial: dali em diante, para o credor, tudo o que
+ * entra é juro — o caixa fica positivo. A projeção supõe o ritmo de
+ * abatimento dos últimos 6 meses e nenhuma dívida nova.
+ */
+export function curvaEquilibrio(debts: Debt[], payments: Payment[], hoje: Date = new Date(), pontos = 90): Equilibrio {
+  const ref = startOfDay(hoje);
+  const movimentos = movimentosDoCredor(debts, payments, ref);
+  if (movimentos.length === 0) return { pontos: [], atingidoEm: null, projecao: null };
+
+  const inicio = parseLocalDate(movimentos[0].data).getTime();
+  const fim = ref.getTime();
+  const passo = Math.max(MS_DIA, (fim - inicio) / pontos);
+
+  const datas = new Set<string>();
+  movimentos.forEach((m) => {
+    datas.add(m.data);
+    const vespera = parseLocalDate(m.data);
+    vespera.setDate(vespera.getDate() - 1);
+    if (vespera.getTime() >= inicio) datas.add(toDateKey(vespera));
+  });
+  for (let t = inicio; t < fim; t += passo) datas.add(toDateKey(new Date(t)));
+  datas.add(toDateKey(ref));
+
+  const acumuladoAte = (data: string) =>
+    movimentos.reduce(
+      (acc, m) => {
+        if (m.data > data) return acc;
+        if (m.tipo === 'divida') acc.inicial -= m.valor;
+        else acc.abatido += m.valor;
+        return acc;
+      },
+      { inicial: 0, abatido: 0 }
+    );
+
+  const serie = [...datas].sort().map((data) => {
+    const { inicial, abatido } = acumuladoAte(data);
+    const saldo = calculateTotalSummary(debts, payments, parseLocalDate(data)).saldoTotal;
+    return { data, inicial, abatido, devido: abatido + saldo };
+  });
+
+  const atual = serie[serie.length - 1];
+  const acima = (p: PontoEquilibrio) => p.inicial > 0 && p.abatido >= p.inicial - 0.005;
+
+  if (acima(atual)) {
+    // Última travessia para cima: o primeiro ponto depois do último abaixo.
+    let i = serie.length - 1;
+    while (i > 0 && acima(serie[i - 1])) i--;
+    return { pontos: serie, atingidoEm: serie[i].data, projecao: null };
+  }
+
+  const inicioJanela = new Date(Math.max(inicio, fim - JANELA_RITMO_DIAS * MS_DIA));
+  const diasJanela = Math.max(1, (fim - inicioJanela.getTime()) / MS_DIA);
+  const abatidoNaJanela = atual.abatido - acumuladoAte(toDateKey(inicioJanela)).abatido;
+  const ritmoDiario = abatidoNaJanela / diasJanela;
+  const falta = atual.inicial - atual.abatido;
+
+  let data: string | null = null;
+  if (ritmoDiario > 0) {
+    const dias = falta / ritmoDiario;
+    if (dias <= 365 * 20) data = toDateKey(new Date(fim + dias * MS_DIA));
+  }
+
+  return {
+    pontos: serie,
+    atingidoEm: null,
+    projecao: { falta, ritmoMensal: ritmoDiario * (365.25 / 12), data },
+  };
+}
+
 export interface FluxoMensal {
   /** YYYY-MM */
   mes: string;

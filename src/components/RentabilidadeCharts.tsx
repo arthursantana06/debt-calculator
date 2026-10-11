@@ -15,7 +15,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Table2, BarChart3 } from 'lucide-react';
 import { parseLocalDate } from '../utils/calculations';
-import type { ComposicaoDivida, FluxoMensal, PontoTrajetoria, Visao } from '../utils/rentabilidade';
+import type { ComposicaoDivida, Equilibrio, FluxoMensal, PontoTrajetoria, Visao } from '../utils/rentabilidade';
 import { COR, fmtBRL, fmtBRLCompacto, fmtData, fmtPct, rotuloMes } from '../utils/formatoGrafico';
 
 /* ------------------------------------------------------------------ */
@@ -37,6 +37,28 @@ function useLargura<T extends HTMLElement>(): [React.RefObject<T | null>, number
 }
 
 /** Marcas de eixo em números redondos (1, 2, 2,5 ou 5 × 10^k). */
+/** Marcas de tempo nos inícios de mês, rareadas para caber em `w` pixels. */
+function ticksMensais(t0: number, t1: number, w: number): { t: number; rotulo: string }[] {
+  const ini = new Date(t0);
+  const meses: Date[] = [];
+  for (let d = new Date(ini.getFullYear(), ini.getMonth() + 1, 1, 12); d.getTime() <= t1; d.setMonth(d.getMonth() + 1)) {
+    meses.push(new Date(d));
+  }
+  const cabem = Math.max(1, Math.floor(w / 56));
+  const salto = Math.max(1, Math.ceil(meses.length / cabem));
+  // O ano aparece na primeira marca e sempre que muda — com marcas rareadas,
+  // janeiro pode ser pulado, e "nov, mai, nov" sem ano fica ambíguo.
+  let anoAnterior = -1;
+  return meses
+    .filter((_, i) => i % salto === 0)
+    .map((d) => {
+      const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const comAno = d.getFullYear() !== anoAnterior;
+      anoAnterior = d.getFullYear();
+      return { t: d.getTime(), rotulo: rotuloMes(mes, comAno) };
+    });
+}
+
 function ticksRedondos(min: number, max: number, alvo = 4): number[] {
   if (max === min) max = min + 1;
   const bruto = (max - min) / alvo;
@@ -257,22 +279,7 @@ export function TrajetoriaChart({ pontos, visao }: { pontos: PontoTrajetoria[]; 
   const areaSaldo = pontos.length ? `${linhaSaldo} L${x(t1).toFixed(1)},${h} L${x(t0).toFixed(1)},${h} Z` : '';
   const linhaIpca = temIpca ? caminho(pontos.map((p) => p.corrigido)) : '';
 
-  // Marcas de tempo: inícios de mês, rareados para caber.
-  const ticksX: { t: number; rotulo: string }[] = [];
-  if (pontos.length) {
-    const ini = new Date(t0);
-    const meses: Date[] = [];
-    for (let d = new Date(ini.getFullYear(), ini.getMonth() + 1, 1, 12); d.getTime() <= t1; d.setMonth(d.getMonth() + 1)) {
-      meses.push(new Date(d));
-    }
-    const cabem = Math.max(1, Math.floor(w / 56));
-    const salto = Math.max(1, Math.ceil(meses.length / cabem));
-    meses.forEach((d, i) => {
-      if (i % salto !== 0) return;
-      const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      ticksX.push({ t: d.getTime(), rotulo: rotuloMes(mes, d.getMonth() === 0 || i === 0) });
-    });
-  }
+  const ticksX = pontos.length ? ticksMensais(t0, t1, w) : [];
 
   const moverPara = useCallback(
     (clientX: number, rect: DOMRect) => {
@@ -397,6 +404,212 @@ export function TrajetoriaChart({ pontos, visao }: { pontos: PontoTrajetoria[]; 
                   { valor: `${diferenca! >= 0 ? '+' : ''}${fmtBRL(diferenca!)}`, rotulo: 'Ganho real' },
                 ]
               : []),
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 1b. Inicial × abatido no tempo, com o ponto de equilíbrio            */
+/* ------------------------------------------------------------------ */
+
+const MS_DIA = 24 * 60 * 60 * 1000;
+/** Além disso a projeção esmagaria o histórico; vira só texto. */
+const HORIZONTE_PROJECAO_DIAS = 3 * 365;
+
+export function EquilibrioChart({ eq, visao }: { eq: Equilibrio; visao: Visao }) {
+  const [ref, largura] = useLargura<HTMLDivElement>();
+  const [foco, setFoco] = useState<number | null>(null);
+
+  const pontos = eq.pontos;
+  const altura = 236;
+  const m = { top: 24, right: 18, bottom: 26, left: 56 };
+  const w = Math.max(0, largura - m.left - m.right);
+  const h = altura - m.top - m.bottom;
+
+  const tempos = pontos.map((p) => parseLocalDate(p.data).getTime());
+  const t0 = tempos[0] ?? 0;
+  const tHoje = tempos[tempos.length - 1] ?? 1;
+  const atual = pontos[pontos.length - 1];
+
+  const tEq = eq.projecao?.data ? parseLocalDate(eq.projecao.data).getTime() : null;
+  const mostraProjecao = tEq !== null && atual && (tEq - tHoje) / MS_DIA <= HORIZONTE_PROJECAO_DIAS;
+  const t1 = mostraProjecao ? tEq! + (tEq! - t0) * 0.06 : tHoje;
+
+  const maxY = Math.max(1, ...pontos.map((p) => Math.max(p.devido, p.inicial)));
+  const ticksY = ticksRedondos(0, maxY, 4);
+  const topoY = ticksY[ticksY.length - 1];
+  const x = (t: number) => (t1 === t0 ? w / 2 : ((t - t0) / (t1 - t0)) * w);
+  const y = (v: number) => h - (v / topoY) * h;
+
+  const linha = (valores: number[]) =>
+    valores.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(tempos[i]).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const linhaInicial = linha(pontos.map((p) => p.inicial));
+  const linhaAbatido = linha(pontos.map((p) => p.abatido));
+  const linhaDevido = linha(pontos.map((p) => p.devido));
+  // Faixa dos juros: sobe pela linha do devido e volta pela do inicial.
+  const faixaJuros = pontos.length
+    ? `${linhaDevido} ${[...pontos]
+        .map((p, i) => ({ p, i }))
+        .reverse()
+        .map(({ p, i }) => `L${x(tempos[i]).toFixed(1)},${y(p.inicial).toFixed(1)}`)
+        .join(' ')} Z`
+    : '';
+
+  const ticksX = pontos.length ? ticksMensais(t0, t1, w) : [];
+  const credor = visao === 'credor';
+  const rotuloInicial = credor ? 'Emprestado' : 'Recebido';
+  const rotuloAbatido = credor ? 'Recebido' : 'Pago';
+
+  const moverPara = (clientX: number, rect: DOMRect) => {
+    const px = clientX - rect.left - m.left;
+    let melhor = 0;
+    let dist = Infinity;
+    tempos.forEach((t, i) => {
+      const d = Math.abs(x(t) - px);
+      if (d < dist) {
+        dist = d;
+        melhor = i;
+      }
+    });
+    setFoco(melhor);
+  };
+
+  const p = foco !== null ? pontos[foco] : null;
+  const posicao = p ? p.abatido - p.inicial : 0;
+  const tAtingido = eq.atingidoEm ? parseLocalDate(eq.atingidoEm).getTime() : null;
+  const pAtingido = eq.atingidoEm ? pontos.find((pt) => pt.data === eq.atingidoEm) : undefined;
+
+  return (
+    <div ref={ref} className="relative select-none" style={{ height: altura }}>
+      {largura > 0 && pontos.length > 1 && (
+        <svg width={largura} height={altura} className="absolute inset-0 block overflow-visible">
+          <g transform={`translate(${m.left},${m.top})`}>
+            {ticksY.map((v) => (
+              <g key={v}>
+                <line x1={0} x2={w} y1={y(v)} y2={y(v)} stroke={v === 0 ? COR.base : COR.grid} strokeWidth={1} />
+                <text x={-10} y={y(v)} dy="0.32em" textAnchor="end" fontSize={10} fill={COR.muted} className="tabular-nums">
+                  {fmtBRLCompacto(v)}
+                </text>
+              </g>
+            ))}
+            {ticksX.map((tk) => (
+              <text key={tk.t} x={x(tk.t)} y={h + 17} textAnchor="middle" fontSize={10} fill={COR.muted}>
+                {tk.rotulo}
+              </text>
+            ))}
+
+            {/* Juros acumulados: o que o devido tem acima do inicial */}
+            <path d={faixaJuros} fill={COR.ipca} fillOpacity={0.1} />
+            <path d={linhaDevido} fill="none" stroke={COR.ipca} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={linhaInicial} fill="none" stroke={COR.originado} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={linhaAbatido} fill="none" stroke={COR.abatido} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+
+            {/* Projeção: tracejada de propósito — é estimativa, não dado */}
+            {mostraProjecao && atual && (
+              <g pointerEvents="none">
+                <line x1={x(tHoje)} x2={x(tHoje)} y1={-10} y2={h} stroke={COR.base} strokeWidth={1} />
+                <text x={x(tHoje)} y={-14} textAnchor="middle" fontSize={9} fill={COR.muted}>
+                  hoje
+                </text>
+                <line
+                  x1={x(tHoje)}
+                  x2={x(tEq!)}
+                  y1={y(atual.inicial)}
+                  y2={y(atual.inicial)}
+                  stroke={COR.originado}
+                  strokeOpacity={0.55}
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                />
+                <line
+                  x1={x(tHoje)}
+                  x2={x(tEq!)}
+                  y1={y(atual.abatido)}
+                  y2={y(atual.inicial)}
+                  stroke={COR.abatido}
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  strokeLinecap="round"
+                />
+                <circle cx={x(tEq!)} cy={y(atual.inicial)} r={5} fill={COR.ink} stroke={COR.surface} strokeWidth={2} />
+                <text x={x(tEq!)} y={y(atual.inicial) - 12} textAnchor="middle" fontSize={10} fontWeight={600} fill={COR.ink}>
+                  ≈ {rotuloMes(eq.projecao!.data!.slice(0, 7), true)}
+                </text>
+              </g>
+            )}
+
+            {/* Equilíbrio já atingido */}
+            {tAtingido !== null && pAtingido && (
+              <g pointerEvents="none">
+                <circle cx={x(tAtingido)} cy={y(pAtingido.abatido)} r={5} fill={COR.ink} stroke={COR.surface} strokeWidth={2} />
+                <text
+                  x={x(tAtingido)}
+                  y={y(pAtingido.abatido) - 12}
+                  textAnchor="middle"
+                  fontSize={10}
+                  fontWeight={600}
+                  fill={COR.ink}
+                >
+                  equilíbrio
+                </text>
+              </g>
+            )}
+
+            {/* Pontas de hoje */}
+            {atual && (
+              <>
+                <circle cx={x(tHoje)} cy={y(atual.inicial)} r={4} fill={COR.originado} stroke={COR.surface} strokeWidth={2} />
+                <circle cx={x(tHoje)} cy={y(atual.abatido)} r={4} fill={COR.abatido} stroke={COR.surface} strokeWidth={2} />
+              </>
+            )}
+
+            {p && foco !== null && (
+              <g pointerEvents="none">
+                <line x1={x(tempos[foco])} x2={x(tempos[foco])} y1={0} y2={h} stroke={COR.base} strokeWidth={1} />
+                <circle cx={x(tempos[foco])} cy={y(p.devido)} r={4} fill={COR.ipca} stroke={COR.surface} strokeWidth={2} />
+                <circle cx={x(tempos[foco])} cy={y(p.inicial)} r={4} fill={COR.originado} stroke={COR.surface} strokeWidth={2} />
+                <circle cx={x(tempos[foco])} cy={y(p.abatido)} r={4} fill={COR.abatido} stroke={COR.surface} strokeWidth={2} />
+              </g>
+            )}
+
+            <rect
+              x={0}
+              y={0}
+              width={x(tHoje)}
+              height={h}
+              fill="transparent"
+              tabIndex={0}
+              className="outline-none cursor-crosshair"
+              onPointerMove={(e) => moverPara(e.clientX, (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect())}
+              onPointerLeave={() => setFoco(null)}
+              onFocus={() => setFoco(pontos.length - 1)}
+              onBlur={() => setFoco(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowLeft') setFoco((f) => Math.max(0, (f ?? pontos.length - 1) - 1));
+                if (e.key === 'ArrowRight') setFoco((f) => Math.min(pontos.length - 1, (f ?? 0) + 1));
+              }}
+            />
+          </g>
+        </svg>
+      )}
+
+      {p && foco !== null && (
+        <Tooltip
+          x={m.left + x(tempos[foco])}
+          y={m.top + y((p.inicial + p.abatido) / 2)}
+          largura={largura}
+          titulo={fmtData(p.data)}
+          linhas={[
+            { cor: COR.originado, valor: fmtBRL(p.inicial), rotulo: rotuloInicial },
+            { cor: COR.abatido, valor: fmtBRL(p.abatido), rotulo: rotuloAbatido },
+            { cor: COR.ipca, valor: fmtBRL(p.devido - p.inicial), rotulo: 'Juros acum.' },
+            {
+              valor: `${posicao >= 0 ? '+' : '−'}${fmtBRL(Math.abs(posicao))}`,
+              rotulo: posicao >= 0 ? (credor ? 'Caixa positivo' : 'Principal quitado') : 'Falta p/ equilíbrio',
+            },
           ]}
         />
       )}

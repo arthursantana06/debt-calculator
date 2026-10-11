@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, LineChart, TrendingUp, TrendingDown, ChevronDown, Info, Loader2 } from 'lucide-react';
 import type { Debt, Payment } from '../utils/calculations';
 import {
+  JANELA_RITMO_DIAS,
   calcularIndicadores,
   composicaoPorDivida,
+  curvaEquilibrio,
   criarIndiceIpca,
   fetchIpca,
   fluxoMensal,
@@ -11,7 +13,14 @@ import {
   PRAZO_MINIMO_DIAS,
 } from '../utils/rentabilidade';
 import type { ComposicaoDivida, IndiceIpca, Visao } from '../utils/rentabilidade';
-import { ChartCard, ComposicaoChart, FluxoMensalChart, TirPorDividaChart, TrajetoriaChart } from './RentabilidadeCharts';
+import {
+  ChartCard,
+  ComposicaoChart,
+  EquilibrioChart,
+  FluxoMensalChart,
+  TirPorDividaChart,
+  TrajetoriaChart,
+} from './RentabilidadeCharts';
 import { COR, fmtBRL, fmtData, fmtPct } from '../utils/formatoGrafico';
 
 interface RentabilidadePanelProps {
@@ -78,6 +87,7 @@ export function RentabilidadePanel({ debts, payments, onClose }: RentabilidadePa
   const ind = useMemo(() => calcularIndicadores(escopo, payments, visao, indice), [escopo, payments, visao, indice]);
   const trajetoria = useMemo(() => trajetoriaSaldo(escopo, payments, indice), [escopo, payments, indice]);
   const mensal = useMemo(() => fluxoMensal(escopo, payments), [escopo, payments]);
+  const equilibrio = useMemo(() => curvaEquilibrio(escopo, payments), [escopo, payments]);
   const composicao = useMemo(() => composicaoPorDivida(escopo, payments, indice), [escopo, payments, indice]);
 
   const totalComposicao: ComposicaoDivida | undefined = useMemo(() => {
@@ -305,6 +315,74 @@ export function RentabilidadePanel({ debts, payments, onClose }: RentabilidadePa
                 }}
               >
                 <FluxoMensalChart meses={mensal} visao={visao} />
+              </ChartCard>
+
+              {/* 2b. Inicial × abatido no tempo — o ponto de equilíbrio */}
+              <ChartCard
+                titulo="Inicial × abatido no tempo"
+                subtitulo={
+                  credor
+                    ? 'Quando o verde alcança o laranja, o capital emprestado voltou: dali em diante, tudo o que entra é juro. A faixa cinza são os juros acumulados.'
+                    : 'Quando o verde alcança o laranja, o principal foi devolvido: dali em diante, você paga só juros. A faixa cinza são os juros acumulados.'
+                }
+                legenda={[
+                  { cor: COR.originado, rotulo: rotulos.originado, forma: 'linha' },
+                  { cor: COR.abatido, rotulo: rotulos.abatido, forma: 'linha' },
+                  { cor: COR.ipca, rotulo: 'Inicial + juros', forma: 'linha' },
+                ]}
+                tabela={{
+                  colunas: ['Data', rotulos.originado, rotulos.abatido, 'Juros acum.', 'Posição'],
+                  linhas: equilibrio.pontos.map((p) => [
+                    fmtData(p.data),
+                    fmtBRL(p.inicial),
+                    fmtBRL(p.abatido),
+                    fmtBRL(p.devido - p.inicial),
+                    fmtBRL(p.abatido - p.inicial),
+                  ]),
+                }}
+                rodape={
+                  equilibrio.projecao
+                    ? `Projeção tracejada: ritmo médio de abatimento dos últimos ${Math.round(JANELA_RITMO_DIAS / 30)} meses, sem dívidas novas. Estimativa, não compromisso.`
+                    : undefined
+                }
+              >
+                <div className="grid grid-cols-3 gap-2 mb-1">
+                  {[
+                    {
+                      r: 'Equilíbrio',
+                      v: equilibrio.atingidoEm
+                        ? fmtData(equilibrio.atingidoEm)
+                        : equilibrio.projecao?.data
+                        ? `≈ ${fmtData(equilibrio.projecao.data).slice(3)}`
+                        : 'sem previsão',
+                      s: equilibrio.atingidoEm ? 'atingido' : equilibrio.projecao?.data ? 'no ritmo atual' : 'sem abatimentos recentes',
+                    },
+                    {
+                      r: equilibrio.atingidoEm ? (credor ? 'Caixa positivo' : 'Além do principal') : 'Falta',
+                      v: equilibrio.projecao
+                        ? fmtBRL(equilibrio.projecao.falta)
+                        : equilibrio.pontos.length
+                        ? fmtBRL(
+                            equilibrio.pontos[equilibrio.pontos.length - 1].abatido -
+                              equilibrio.pontos[equilibrio.pontos.length - 1].inicial
+                          )
+                        : '—',
+                      s: equilibrio.atingidoEm ? `${rotulos.abatido.toLowerCase()} acima do inicial` : 'para o equilíbrio',
+                    },
+                    {
+                      r: 'Ritmo',
+                      v: equilibrio.projecao ? `${fmtBRL(equilibrio.projecao.ritmoMensal)}/mês` : '—',
+                      s: `média dos últimos ${Math.round(JANELA_RITMO_DIAS / 30)} meses`,
+                    },
+                  ].map((c) => (
+                    <div key={c.r} className="rounded-lg border border-zinc-900 bg-zinc-950/40 px-2.5 py-2">
+                      <span className="block text-[9px] font-semibold uppercase tracking-wider text-zinc-500">{c.r}</span>
+                      <span className="block mt-1 text-[13px] font-medium text-zinc-100 leading-tight">{c.v}</span>
+                      <span className="block mt-0.5 text-[9px] text-zinc-600 leading-snug">{c.s}</span>
+                    </div>
+                  ))}
+                </div>
+                <EquilibrioChart eq={equilibrio} visao={visao} />
               </ChartCard>
 
               {/* 3. Inicial × abatido */}
