@@ -35,11 +35,22 @@ create table abatimentos (
   valor numeric(12, 2) not null
 );
 
--- 3. Desativar RLS para permitir acesso público sem autenticação
+-- 3. Criar Tabela de Fluxos Simulados Salvos (apenas as mutações hipotéticas)
+create table fluxos_salvos (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  nome text not null,
+  dividas jsonb not null default '[]'::jsonb,
+  abatimentos jsonb not null default '[]'::jsonb
+);
+
+-- 4. Desativar RLS para permitir acesso público sem autenticação
 alter table dividas disable row level security;
 alter table abatimentos disable row level security;
+alter table fluxos_salvos disable row level security;
 
--- 4. Ativar Realtime para ambas tabelas
+-- 5. Ativar Realtime para dívidas e abatimentos
 alter publication supabase_realtime add table dividas;
 alter publication supabase_realtime add table abatimentos;`;
 

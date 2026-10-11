@@ -1,9 +1,10 @@
 /**
  * Motor da Simulação de Fluxo.
  *
- * Nada aqui é persistido: a simulação vive apenas em memória, combinando as
- * dívidas e abatimentos reais com mutações hipotéticas para projetar o saldo
- * devedor em qualquer data futura.
+ * A simulação combina as dívidas e abatimentos reais com mutações hipotéticas
+ * para projetar o saldo devedor em qualquer data futura. Um fluxo salvo guarda
+ * apenas as mutações hipotéticas — os dados reais são sempre os do momento em
+ * que o fluxo é aberto, nunca uma fotografia do dia em que foi salvo.
  */
 
 import { calculateDebtDetails, calculateTotalSummary, parseLocalDate, startOfDay, toDateKey } from './calculations';
@@ -16,10 +17,25 @@ export function isSimulated(id: string): boolean {
   return id.startsWith(SIM_PREFIX);
 }
 
-let simCounter = 0;
+/**
+ * Um contador por sessão não basta: ao reabrir um fluxo salvo, os IDs gravados
+ * colidiriam com os novos. Tempo + aleatório é único o suficiente.
+ */
 export function createSimId(kind: 'divida' | 'abatimento'): string {
-  simCounter += 1;
-  return `${SIM_PREFIX}${kind}-${simCounter}`;
+  const aleatorio = Math.random().toString(36).slice(2, 8);
+  return `${SIM_PREFIX}${kind}-${Date.now().toString(36)}-${aleatorio}`;
+}
+
+/** Fluxo simulado persistido na tabela `fluxos_salvos`. */
+export interface SavedFlow {
+  id: string;
+  created_at: string;
+  updated_at?: string;
+  nome: string;
+  /** Dívidas hipotéticas (IDs com prefixo `sim-`). */
+  dividas: Debt[];
+  /** Abatimentos hipotéticos — podem mirar dívidas reais ou hipotéticas. */
+  abatimentos: Payment[];
 }
 
 export interface DayCell {
@@ -171,7 +187,8 @@ export function buildFlowEntries(debts: Debt[], payments: Payment[], ate: Date):
       id: pay.id,
       tipo: 'abatimento',
       data: pay.data_pagamento,
-      descricao: alvo ? `Abatimento — ${alvo.descricao}` : 'Abatimento',
+      // Sem alvo, o abatimento não altera saldo nenhum — dizer por quê.
+      descricao: alvo ? `Abatimento — ${alvo.descricao}` : 'Abatimento — dívida removida',
       valor: -Number(pay.valor),
       simulado: isSimulated(pay.id),
     });
@@ -188,4 +205,37 @@ export function buildFlowEntries(debts: Debt[], payments: Payment[], ate: Date):
     ...ev,
     saldoApos: saldoNaData(debts, payments, parseLocalDate(ev.data)),
   }));
+}
+
+export interface PlannedEntry extends FlowEntry {
+  /** A data planejada já passou e a transação não foi registrada como real. */
+  atrasada: boolean;
+}
+
+/**
+ * Transações planejadas de um fluxo salvo, em ordem cronológica, com o saldo
+ * devedor projetado após cada uma (dados reais atuais + o fluxo).
+ */
+export function buildPlannedEntries(
+  flow: Pick<SavedFlow, 'dividas' | 'abatimentos'>,
+  debts: Debt[],
+  payments: Payment[],
+  hoje: Date = new Date()
+): PlannedEntry[] {
+  const datas = [
+    ...flow.dividas.map((d) => d.data_divida),
+    ...flow.abatimentos.map((p) => p.data_pagamento),
+  ];
+  if (datas.length === 0) return [];
+
+  const ultima = datas.reduce((max, d) => (d > max ? d : max));
+  const hojeKey = toDateKey(startOfDay(hoje));
+
+  return buildFlowEntries(
+    [...debts, ...flow.dividas],
+    [...payments, ...flow.abatimentos],
+    parseLocalDate(ultima)
+  )
+    .filter((e) => e.simulado)
+    .map((e) => ({ ...e, atrasada: e.data < hojeKey }));
 }

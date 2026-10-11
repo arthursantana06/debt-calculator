@@ -71,6 +71,19 @@ export const generateUUID = (): string => {
 // Chaves do LocalStorage
 const STORAGE_DEBTS_KEY = 'debt_calculator_debts';
 const STORAGE_PAYMENTS_KEY = 'debt_calculator_payments';
+const STORAGE_FLOWS_KEY = 'debt_calculator_flows';
+
+type MockTable = 'dividas' | 'abatimentos' | 'fluxos_salvos';
+const STORAGE_KEYS: Record<MockTable, string> = {
+  dividas: STORAGE_DEBTS_KEY,
+  abatimentos: STORAGE_PAYMENTS_KEY,
+  fluxos_salvos: STORAGE_FLOWS_KEY,
+};
+const SORT_KEYS: Record<MockTable, string> = {
+  dividas: 'data_divida',
+  abatimentos: 'data_pagamento',
+  fluxos_salvos: 'created_at',
+};
 
 // Canais de callbacks locais para simular Realtime
 type RealtimeCallback = (payload: any) => void;
@@ -100,8 +113,8 @@ export const mockSupabase = {
   isMock: true,
   
   // Tabelas
-  from(table: 'dividas' | 'abatimentos') {
-    const key = table === 'dividas' ? STORAGE_DEBTS_KEY : STORAGE_PAYMENTS_KEY;
+  from(table: MockTable) {
+    const key = STORAGE_KEYS[table];
     
     // Obter dados atuais
     const getData = (): any[] => {
@@ -119,8 +132,8 @@ export const mockSupabase = {
       async select(_columns: string = '*') {
         try {
           const data = getData();
-          // Ordena decrescente por data_divida ou data_pagamento
-          const sortKey = table === 'dividas' ? 'data_divida' : 'data_pagamento';
+          // Ordena decrescente pela data relevante da tabela
+          const sortKey = SORT_KEYS[table];
           data.sort((a, b) => new Date(b[sortKey]).getTime() - new Date(a[sortKey]).getTime());
           
           return { data, error: null };

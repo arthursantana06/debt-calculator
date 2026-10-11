@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { db, isSupabaseConfigured } from './supabaseClient';
+import { db, generateUUID, isSupabaseConfigured } from './supabaseClient';
 import type { Debt, Payment } from './utils/calculations';
+import type { SavedFlow } from './utils/simulation';
 import { Dashboard } from './components/Dashboard';
 import { DebtForm } from './components/DebtForm';
 import { DebtList } from './components/DebtList';
@@ -10,6 +11,7 @@ import { NotesSection } from './components/NotesSection';
 import { PaymentForm } from './components/PaymentForm';
 import { GlobalPaymentsList } from './components/GlobalPaymentsList';
 import { FlowSimulator } from './components/FlowSimulator';
+import { SavedFlowsList } from './components/SavedFlowsList';
 import { Scale, ShieldCheck, Loader2, FlaskConical, ListOrdered } from 'lucide-react';
 import { runMathTests } from './utils/calculations.test';
 
@@ -19,6 +21,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
   const [simulatorTab, setSimulatorTab] = useState<'calendario' | 'fluxo' | null>(null);
+  const [flows, setFlows] = useState<SavedFlow[]>([]);
+  const [flowsIndisponiveis, setFlowsIndisponiveis] = useState(false);
+  /** Fluxo salvo aberto no simulador; null = simulação nova. */
+  const [simulatorFlow, setSimulatorFlow] = useState<SavedFlow | null>(null);
 
   // Executa testes matemáticos de comprovação no console para verificação
   useEffect(() => {
@@ -46,8 +52,27 @@ function App() {
     }
   };
 
+  /**
+   * Carregado à parte: se a tabela `fluxos_salvos` ainda não existir no
+   * Supabase, as dívidas e abatimentos continuam funcionando normalmente.
+   */
+  const fetchFlows = async () => {
+    try {
+      const { data, error } = await db.from('fluxos_salvos').select('*');
+      if (error) throw error;
+      const lista = (data || []) as SavedFlow[];
+      lista.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      setFlows(lista);
+      setFlowsIndisponiveis(false);
+    } catch (err) {
+      console.error('Erro ao carregar fluxos salvos:', err);
+      setFlowsIndisponiveis(true);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchFlows();
   }, []);
 
   // 2. Configura Sincronização em Tempo Real (Realtime)
@@ -185,6 +210,74 @@ function App() {
     }
   };
 
+  // 7. Ações: Salvar Fluxo Simulado (com id, sobrescreve o existente)
+  const handleSaveFlow = async (dados: {
+    id?: string;
+    nome: string;
+    dividas: Debt[];
+    abatimentos: Payment[];
+  }): Promise<SavedFlow | null> => {
+    const agora = new Date().toISOString();
+    try {
+      if (dados.id) {
+        const changes = {
+          nome: dados.nome,
+          dividas: dados.dividas,
+          abatimentos: dados.abatimentos,
+          updated_at: agora,
+        };
+        const { error } = await db.from('fluxos_salvos').update(changes).eq('id', dados.id);
+        if (error) throw error;
+
+        const atual = flows.find((f) => f.id === dados.id);
+        const salvo: SavedFlow = { ...(atual as SavedFlow), id: dados.id, ...changes };
+        setFlows((prev) => prev.map((f) => (f.id === dados.id ? salvo : f)));
+        return salvo;
+      }
+
+      // O id nasce no cliente para que o fluxo possa ser atualizado sem reler a tabela.
+      const novo: SavedFlow = {
+        id: generateUUID(),
+        created_at: agora,
+        updated_at: agora,
+        nome: dados.nome,
+        dividas: dados.dividas,
+        abatimentos: dados.abatimentos,
+      };
+      const { error } = await db.from('fluxos_salvos').insert(novo);
+      if (error) throw error;
+
+      setFlows((prev) => [novo, ...prev]);
+      setFlowsIndisponiveis(false);
+      return novo;
+    } catch (err) {
+      console.error('Erro ao salvar fluxo:', err);
+      alert(
+        isSupabaseConfigured
+          ? 'Falha ao salvar o fluxo. Confirme que a tabela "fluxos_salvos" foi criada no SQL Editor do Supabase.'
+          : 'Falha ao salvar o fluxo. Verifique o console de desenvolvimento do navegador.'
+      );
+      return null;
+    }
+  };
+
+  // 8. Ações: Excluir Fluxo Simulado
+  const handleDeleteFlow = async (id: string) => {
+    try {
+      const { error } = await db.from('fluxos_salvos').delete().eq('id', id);
+      if (error) throw error;
+      setFlows((prev) => prev.filter((f) => f.id !== id));
+    } catch (err) {
+      console.error('Erro ao excluir fluxo:', err);
+      alert('Erro ao excluir o fluxo.');
+    }
+  };
+
+  const abrirSimulador = (tab: 'calendario' | 'fluxo', flow: SavedFlow | null = null) => {
+    setSimulatorFlow(flow);
+    setSimulatorTab(tab);
+  };
+
 
 
   return (
@@ -243,14 +336,14 @@ function App() {
               {/* Projeções: calendário de simulação e fluxo em lista */}
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => setSimulatorTab('calendario')}
+                  onClick={() => abrirSimulador('calendario')}
                   className="flex items-center justify-center gap-1.5 py-3 bg-zinc-900/20 hover:bg-zinc-900 border border-zinc-900 text-zinc-400 hover:text-zinc-200 font-bold rounded-xl transition duration-150 cursor-pointer text-[10px] uppercase tracking-wider"
                 >
                   <FlaskConical className="w-3.5 h-3.5" />
                   Simular Fluxo
                 </button>
                 <button
-                  onClick={() => setSimulatorTab('fluxo')}
+                  onClick={() => abrirSimulador('fluxo')}
                   className="flex items-center justify-center gap-1.5 py-3 bg-zinc-900/20 hover:bg-zinc-900 border border-zinc-900 text-zinc-400 hover:text-zinc-200 font-bold rounded-xl transition duration-150 cursor-pointer text-[10px] uppercase tracking-wider"
                 >
                   <ListOrdered className="w-3.5 h-3.5" />
@@ -261,6 +354,14 @@ function App() {
 
             {/* Listas cronológicas */}
             <div className="flex-1 space-y-4">
+              <SavedFlowsList
+                flows={flows}
+                debts={debts}
+                payments={payments}
+                indisponivel={flowsIndisponiveis}
+                onOpenFlow={(flow) => abrirSimulador('calendario', flow)}
+                onDeleteFlow={handleDeleteFlow}
+              />
               <DebtList
                 debts={debts}
                 payments={payments}
@@ -279,10 +380,16 @@ function App() {
       {/* Simulador de Fluxo (calendário + fluxo simplificado) */}
       {simulatorTab && (
         <FlowSimulator
+          key={simulatorFlow?.id ?? 'nova'}
           debts={debts}
           payments={payments}
           initialTab={simulatorTab}
-          onClose={() => setSimulatorTab(null)}
+          initialFlow={simulatorFlow}
+          onSaveFlow={handleSaveFlow}
+          onClose={() => {
+            setSimulatorTab(null);
+            setSimulatorFlow(null);
+          }}
         />
       )}
 

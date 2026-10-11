@@ -15,6 +15,8 @@ import {
   TrendingUp,
   TrendingDown,
   FlaskConical,
+  Save,
+  Loader2,
 } from 'lucide-react';
 import { calculateTotalSummary, parseLocalDate, toDateKey } from '../utils/calculations';
 import type { Debt, Payment } from '../utils/calculations';
@@ -25,11 +27,21 @@ import {
   createSimId,
   dividasAbertasNaData,
 } from '../utils/simulation';
+import type { SavedFlow } from '../utils/simulation';
 
 interface FlowSimulatorProps {
   debts: Debt[];
   payments: Payment[];
   initialTab?: 'calendario' | 'fluxo';
+  /** Fluxo salvo a reabrir; sem ele, a simulação começa vazia. */
+  initialFlow?: SavedFlow | null;
+  /** Grava (com `id`, sobrescreve) e devolve o fluxo salvo, ou null se falhar. */
+  onSaveFlow: (dados: {
+    id?: string;
+    nome: string;
+    dividas: Debt[];
+    abatimentos: Payment[];
+  }) => Promise<SavedFlow | null>;
   onClose: () => void;
 }
 
@@ -55,13 +67,32 @@ const formatDate = (dateStr: string) => {
   return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateStr;
 };
 
-export function FlowSimulator({ debts, payments, initialTab = 'calendario', onClose }: FlowSimulatorProps) {
+/** Assinatura das mutações, para saber se há alteração ainda não salva. */
+const serializar = (dividas: Debt[], abatimentos: Payment[]) => JSON.stringify([dividas, abatimentos]);
+
+export function FlowSimulator({
+  debts,
+  payments,
+  initialTab = 'calendario',
+  initialFlow = null,
+  onSaveFlow,
+  onClose,
+}: FlowSimulatorProps) {
   const hoje = new Date();
   const hojeStr = toDateKey(hoje);
 
   const [tab, setTab] = useState<'calendario' | 'fluxo'>(initialTab);
-  const [simDebts, setSimDebts] = useState<Debt[]>([]);
-  const [simPayments, setSimPayments] = useState<Payment[]>([]);
+  const [simDebts, setSimDebts] = useState<Debt[]>(initialFlow?.dividas ?? []);
+  const [simPayments, setSimPayments] = useState<Payment[]>(initialFlow?.abatimentos ?? []);
+  const [fluxoAtual, setFluxoAtual] = useState<{ id: string; nome: string } | null>(
+    initialFlow ? { id: initialFlow.id, nome: initialFlow.nome } : null
+  );
+  const [snapshotSalvo, setSnapshotSalvo] = useState(() =>
+    serializar(initialFlow?.dividas ?? [], initialFlow?.abatimentos ?? [])
+  );
+  /** null = campo de nome fechado; string = nome sendo digitado. */
+  const [nomeEmEdicao, setNomeEmEdicao] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
   const [selectedDate, setSelectedDate] = useState(hojeStr);
   const [viewYear, setViewYear] = useState(hoje.getFullYear());
   const [viewMonth, setViewMonth] = useState(hoje.getMonth());
@@ -95,6 +126,7 @@ export function FlowSimulator({ debts, payments, initialTab = 'calendario', onCl
   }, [simDebts, simPayments, selectedDate]);
 
   const totalMutacoes = simDebts.length + simPayments.length;
+  const alterado = serializar(simDebts, simPayments) !== snapshotSalvo;
 
   const navegarMes = (delta: number) => {
     const novo = new Date(viewYear, viewMonth + delta, 1, 12, 0, 0);
@@ -152,15 +184,50 @@ export function FlowSimulator({ debts, payments, initialTab = 'calendario', onCl
     setSimPayments((prev) => prev.filter((p) => p.id_divida !== id));
   };
 
+  /** Esvazia a tela e desvincula do fluxo salvo — o fluxo gravado não é tocado. */
   const limparSimulacao = () => {
+    if (alterado && !window.confirm('Descartar as alterações não salvas?')) return;
     setSimDebts([]);
     setSimPayments([]);
     setFormAberto(null);
+    setFluxoAtual(null);
+    setSnapshotSalvo(serializar([], []));
+    setNomeEmEdicao(null);
+  };
+
+  const salvar = async (nome: string) => {
+    if (!nome.trim()) return;
+    setSalvando(true);
+    try {
+      const salvo = await onSaveFlow({
+        id: fluxoAtual?.id,
+        nome: nome.trim(),
+        dividas: simDebts,
+        abatimentos: simPayments,
+      });
+      if (salvo) {
+        setFluxoAtual({ id: salvo.id, nome: salvo.nome });
+        setSnapshotSalvo(serializar(salvo.dividas, salvo.abatimentos));
+        setNomeEmEdicao(null);
+      }
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const handleSalvarClick = () => {
+    if (fluxoAtual) salvar(fluxoAtual.nome);
+    else setNomeEmEdicao('');
+  };
+
+  const fechar = () => {
+    if (alterado && !window.confirm('Há alterações não salvas nesta simulação. Fechar mesmo assim?')) return;
+    onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm animate-fadeIn">
-      <div className="absolute inset-0" onClick={onClose} />
+      <div className="absolute inset-0" onClick={fechar} />
 
       <div className="relative w-full max-w-md bg-zinc-950 border-t md:border border-zinc-900 md:rounded-xl rounded-t-xl overflow-hidden minimal-panel z-10 animate-slideUp max-h-[92vh] flex flex-col">
         {/* Barra superior de toque para Mobile */}
@@ -175,12 +242,14 @@ export function FlowSimulator({ debts, payments, initialTab = 'calendario', onCl
               <FlaskConical className="w-3.5 h-3.5 text-zinc-500" />
               Simulador de Fluxo
             </h3>
-            <p className="text-[10px] text-zinc-550 mt-1 font-medium">
-              Projeções hipotéticas — nada aqui é salvo
+            <p className="text-[10px] text-zinc-550 mt-1 font-medium truncate">
+              {fluxoAtual
+                ? `Fluxo salvo: ${fluxoAtual.nome}`
+                : 'Projeções hipotéticas — salve para acompanhar'}
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={fechar}
             className="p-1.5 text-zinc-500 hover:text-zinc-300 rounded-lg hover:bg-zinc-900 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -409,20 +478,67 @@ export function FlowSimulator({ debts, payments, initialTab = 'calendario', onCl
           )}
         </div>
 
-        {/* Rodapé */}
-        {totalMutacoes > 0 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-900 flex-shrink-0">
-            <span className="text-[9px] text-zinc-550 uppercase tracking-wider font-semibold">
-              {totalMutacoes === 1 ? '1 mutação simulada' : `${totalMutacoes} mutações simuladas`}
-            </span>
-            <button
-              onClick={limparSimulacao}
-              className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+        {/* Rodapé: salvar o fluxo e limpar a simulação */}
+        {(totalMutacoes > 0 || fluxoAtual) &&
+          (nomeEmEdicao !== null ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                salvar(nomeEmEdicao);
+              }}
+              className="flex items-center gap-2 px-5 py-3 border-t border-zinc-900 flex-shrink-0"
             >
-              <RotateCcw className="w-3 h-3" /> Limpar simulação
-            </button>
-          </div>
-        )}
+              <input
+                type="text"
+                value={nomeEmEdicao}
+                onChange={(e) => setNomeEmEdicao(e.target.value)}
+                placeholder="Nome do fluxo (ex.: Plano de outubro)"
+                autoFocus
+                required
+                className="flex-1 min-w-0 bg-zinc-950 border border-zinc-900 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-700 focus-minimal"
+              />
+              <button
+                type="submit"
+                disabled={salvando || !nomeEmEdicao.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-zinc-200 text-zinc-950 font-bold rounded-lg text-[10px] uppercase tracking-wider transition-colors disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+              >
+                {salvando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                Salvar
+              </button>
+              <button
+                type="button"
+                onClick={() => setNomeEmEdicao(null)}
+                className="p-1 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          ) : (
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-zinc-900 flex-shrink-0">
+              <span className="text-[9px] text-zinc-550 uppercase tracking-wider font-semibold truncate">
+                {totalMutacoes === 1 ? '1 mutação' : `${totalMutacoes} mutações`}
+                {fluxoAtual && (alterado ? ' · não salvo' : ' · salvo')}
+              </span>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                {alterado && (
+                  <button
+                    onClick={handleSalvarClick}
+                    disabled={salvando}
+                    className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-200 hover:text-white disabled:opacity-30 transition-colors cursor-pointer"
+                  >
+                    {salvando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                    {fluxoAtual ? 'Salvar alterações' : 'Salvar fluxo'}
+                  </button>
+                )}
+                <button
+                  onClick={limparSimulacao}
+                  className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" /> {fluxoAtual ? 'Nova' : 'Limpar'}
+                </button>
+              </div>
+            </div>
+          ))}
       </div>
     </div>
   );
