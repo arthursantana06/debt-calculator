@@ -549,7 +549,9 @@ export function FlowSimulator({
 /* ------------------------------------------------------------------ */
 
 function FlowList({ debts, payments, ate }: { debts: Debt[]; payments: Payment[]; ate: Date }) {
-  const entries = useMemo(() => buildFlowEntries(debts, payments, ate), [debts, payments, ate]);
+  // O motor devolve em ordem cronológica (precisa, para o saldo após cada
+  // evento); a lista mostra o mais recente primeiro.
+  const entries = useMemo(() => buildFlowEntries(debts, payments, ate).reverse(), [debts, payments, ate]);
 
   const totalEntradas = entries.filter((e) => e.valor > 0).reduce((s, e) => s + e.valor, 0);
   const totalSaidas = entries.filter((e) => e.valor < 0).reduce((s, e) => s - e.valor, 0);
