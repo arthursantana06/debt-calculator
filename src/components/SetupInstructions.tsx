@@ -45,12 +45,24 @@ create table fluxos_salvos (
   abatimentos jsonb not null default '[]'::jsonb
 );
 
--- 4. Desativar RLS para permitir acesso público sem autenticação
+-- 4. Criar Tabela de Notas & Anotações (copiavel = texto com botão copiar, ex.: chave PIX)
+create table notas (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  texto text not null default '',
+  copiavel text
+);
+
+-- 5. Acesso público sem autenticação. Alguns projetos ligam RLS sozinhos em
+-- tabelas novas; uma política explícita funciona nos dois casos.
 alter table dividas disable row level security;
 alter table abatimentos disable row level security;
-alter table fluxos_salvos disable row level security;
+alter table fluxos_salvos enable row level security;
+create policy "anon acessa fluxos_salvos" on fluxos_salvos for all to anon using (true) with check (true);
+alter table notas enable row level security;
+create policy "anon acessa notas" on notas for all to anon using (true) with check (true);
 
--- 5. Ativar Realtime para dívidas e abatimentos
+-- 6. Ativar Realtime para dívidas e abatimentos
 alter publication supabase_realtime add table dividas;
 alter publication supabase_realtime add table abatimentos;`;
 

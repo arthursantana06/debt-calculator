@@ -72,17 +72,22 @@ export const generateUUID = (): string => {
 const STORAGE_DEBTS_KEY = 'debt_calculator_debts';
 const STORAGE_PAYMENTS_KEY = 'debt_calculator_payments';
 const STORAGE_FLOWS_KEY = 'debt_calculator_flows';
+// Diferente de 'debt_calculator_notes', a chave antiga das notas locais — que é
+// migrada para a tabela `notas` e então apagada.
+const STORAGE_NOTAS_KEY = 'debt_calculator_notas';
 
-type MockTable = 'dividas' | 'abatimentos' | 'fluxos_salvos';
+type MockTable = 'dividas' | 'abatimentos' | 'fluxos_salvos' | 'notas';
 const STORAGE_KEYS: Record<MockTable, string> = {
   dividas: STORAGE_DEBTS_KEY,
   abatimentos: STORAGE_PAYMENTS_KEY,
   fluxos_salvos: STORAGE_FLOWS_KEY,
+  notas: STORAGE_NOTAS_KEY,
 };
 const SORT_KEYS: Record<MockTable, string> = {
   dividas: 'data_divida',
   abatimentos: 'data_pagamento',
   fluxos_salvos: 'created_at',
+  notas: 'created_at',
 };
 
 // Canais de callbacks locais para simular Realtime

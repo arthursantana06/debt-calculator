@@ -1,14 +1,74 @@
 import { useState, useEffect } from 'react';
-import { FileText, Plus, Trash2, Calendar, Copy, Check, KeyRound, X } from 'lucide-react';
-import { generateUUID } from '../supabaseClient';
+import { FileText, Plus, Trash2, Calendar, Copy, Check, KeyRound, X, CloudOff, Loader2 } from 'lucide-react';
+import { db, generateUUID } from '../supabaseClient';
 
 interface Note {
   id: string;
   texto: string;
-  created_at: string; // Formato ISO ou data formatada
+  created_at: string; // Formato ISO
   /** Texto pronto para copiar com um toque (ex.: chave PIX). */
-  copiavel?: string;
+  copiavel?: string | null;
 }
+
+/** Onde as notas viviam antes de irem para a tabela `notas`. */
+const LEGADO_KEY = 'debt_calculator_notes';
+
+const lerLegado = (): Note[] => {
+  try {
+    return JSON.parse(localStorage.getItem(LEGADO_KEY) || '[]');
+  } catch {
+    return [];
+  }
+};
+
+const gravarLegado = (notas: Note[]) => {
+  try {
+    localStorage.setItem(LEGADO_KEY, JSON.stringify(notas));
+  } catch {
+    // Sem armazenamento local, não há onde guardar.
+  }
+};
+
+const maisRecentesPrimeiro = (notas: Note[]) => [...notas].sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+/** 'ok' = banco respondeu; 'local' = tabela indisponível, notas só neste navegador. */
+type Origem = 'carregando' | 'ok' | 'local';
+
+/**
+ * Lê as notas do banco e, uma única vez, sobe as que só existiam neste
+ * navegador. A cópia local só é apagada depois que o banco confirma a gravação.
+ */
+async function carregarNotas(): Promise<{ notas: Note[]; origem: Origem }> {
+  const legado = lerLegado();
+  try {
+    const { data, error } = await db.from('notas').select('*');
+    if (error) throw error;
+    const doBanco = (data || []) as Note[];
+
+    const pendentes = legado.filter((n) => !doBanco.some((b) => b.id === n.id));
+    if (pendentes.length > 0) {
+      const linhas = pendentes.map((n) => ({
+        id: n.id,
+        created_at: n.created_at,
+        texto: n.texto ?? '',
+        copiavel: n.copiavel || null,
+      }));
+      const { error: erroMigracao } = await db.from('notas').insert(linhas);
+      if (erroMigracao) throw erroMigracao;
+      doBanco.push(...linhas);
+    }
+    if (legado.length > 0) localStorage.removeItem(LEGADO_KEY);
+
+    return { notas: maisRecentesPrimeiro(doBanco), origem: 'ok' };
+  } catch (err) {
+    console.error('Notas: banco indisponível, usando as notas deste navegador.', err);
+    return { notas: maisRecentesPrimeiro(legado), origem: 'local' };
+  }
+}
+
+// Em modo estrito o React monta o efeito duas vezes; as duas montagens
+// compartilham a mesma carga, para a migração não subir as notas em dobro.
+let cargaEmCurso: ReturnType<typeof carregarNotas> | null = null;
 
 /**
  * Copia para a área de transferência. A API moderna exige contexto seguro
@@ -70,29 +130,30 @@ function CaixaCopiavel({ texto }: { texto: string }) {
 
 export function NotesSection() {
   const [notes, setNotes] = useState<Note[]>([]);
+  const [origem, setOrigem] = useState<Origem>('carregando');
+  const [salvando, setSalvando] = useState(false);
   const [newNoteText, setNewNoteText] = useState('');
   /** null = caixa de cópia fechada no formulário. */
   const [newCopiavel, setNewCopiavel] = useState<string | null>(null);
 
-  // Carrega notas do localStorage ao iniciar
   useEffect(() => {
-    const savedNotes = localStorage.getItem('debt_calculator_notes');
-    if (savedNotes) {
-      try {
-        setNotes(JSON.parse(savedNotes));
-      } catch (e) {
-        console.error('Erro ao ler anotações:', e);
-      }
-    }
+    let vivo = true;
+    cargaEmCurso ??= carregarNotas();
+    cargaEmCurso
+      .then((r) => {
+        if (!vivo) return;
+        setNotes(r.notas);
+        setOrigem(r.origem);
+      })
+      .finally(() => {
+        cargaEmCurso = null;
+      });
+    return () => {
+      vivo = false;
+    };
   }, []);
 
-  // Salva notas no localStorage
-  const saveNotes = (updatedNotes: Note[]) => {
-    setNotes(updatedNotes);
-    localStorage.setItem('debt_calculator_notes', JSON.stringify(updatedNotes));
-  };
-
-  const handleAddNote = (e: React.FormEvent) => {
+  const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
     const copiavel = newCopiavel?.trim() || '';
     // Uma nota pode ser só a caixa de cópia (ex.: apenas a chave PIX).
@@ -102,17 +163,46 @@ export function NotesSection() {
       id: generateUUID(),
       texto: newNoteText.trim(),
       created_at: new Date().toISOString(),
-      ...(copiavel ? { copiavel } : {}),
+      copiavel: copiavel || null,
     };
 
-    saveNotes([newNote, ...notes]);
+    if (origem === 'ok') {
+      setSalvando(true);
+      try {
+        const { error } = await db.from('notas').insert(newNote);
+        if (error) throw error;
+      } catch (err) {
+        console.error('Erro ao salvar anotação:', err);
+        alert('Falha ao salvar a anotação no banco. Confirme que a tabela "notas" existe no Supabase.');
+        return;
+      } finally {
+        setSalvando(false);
+      }
+      setNotes((prev) => [newNote, ...prev]);
+    } else {
+      const atualizadas = [newNote, ...notes];
+      setNotes(atualizadas);
+      gravarLegado(atualizadas);
+    }
+
     setNewNoteText('');
     setNewCopiavel(null);
   };
 
-  const handleDeleteNote = (id: string) => {
-    const updatedNotes = notes.filter((n) => n.id !== id);
-    saveNotes(updatedNotes);
+  const handleDeleteNote = async (id: string) => {
+    if (origem === 'ok') {
+      const { error } = await db.from('notas').delete().eq('id', id);
+      if (error) {
+        console.error('Erro ao excluir anotação:', error);
+        alert('Falha ao excluir a anotação.');
+        return;
+      }
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+    } else {
+      const atualizadas = notes.filter((n) => n.id !== id);
+      setNotes(atualizadas);
+      gravarLegado(atualizadas);
+    }
   };
 
   const formatNoteDate = (isoStr: string) => {
@@ -144,6 +234,14 @@ export function NotesSection() {
           <h3 className="font-bold text-[10px] uppercase tracking-wider text-zinc-300">
             Notas & Anotações
           </h3>
+          {origem === 'local' && (
+            <span
+              className="ml-auto flex items-center gap-1 text-[9px] font-semibold text-zinc-500"
+              title='A tabela "notas" não respondeu: as notas estão salvas só neste navegador.'
+            >
+              <CloudOff className="w-3 h-3" /> Só neste aparelho
+            </span>
+          )}
         </div>
 
         {/* Input Formulário */}
@@ -171,10 +269,11 @@ export function NotesSection() {
             </button>
             <button
               type="submit"
-              className="p-2 bg-white text-zinc-950 hover:bg-zinc-200 rounded-lg transition-colors cursor-pointer flex items-center justify-center"
+              disabled={salvando || origem === 'carregando'}
+              className="p-2 bg-white text-zinc-950 hover:bg-zinc-200 rounded-lg transition-colors cursor-pointer flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
               title="Adicionar Anotação"
             >
-              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+              {salvando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5 stroke-[2.5]" />}
             </button>
           </div>
 
@@ -236,7 +335,7 @@ export function NotesSection() {
           </div>
         ) : (
           <p className="text-[10px] text-zinc-600 font-medium text-center py-2.5 italic">
-            Nenhuma anotação registrada.
+            {origem === 'carregando' ? 'Carregando anotações…' : 'Nenhuma anotação registrada.'}
           </p>
         )}
 
