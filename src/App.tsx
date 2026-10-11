@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { db, generateUUID, isSupabaseConfigured } from './supabaseClient';
 import type { Debt, Payment } from './utils/calculations';
 import type { SavedFlow } from './utils/simulation';
@@ -12,8 +12,13 @@ import { PaymentForm } from './components/PaymentForm';
 import { GlobalPaymentsList } from './components/GlobalPaymentsList';
 import { FlowSimulator } from './components/FlowSimulator';
 import { SavedFlowsList } from './components/SavedFlowsList';
-import { Scale, ShieldCheck, Loader2, FlaskConical, ListOrdered } from 'lucide-react';
+import { Scale, ShieldCheck, Loader2, FlaskConical, ListOrdered, LineChart } from 'lucide-react';
 import { runMathTests } from './utils/calculations.test';
+
+// Os gráficos só são baixados quando o painel é aberto.
+const RentabilidadePanel = lazy(() =>
+  import('./components/RentabilidadePanel').then((m) => ({ default: m.RentabilidadePanel }))
+);
 
 function App() {
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -21,6 +26,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
   const [simulatorTab, setSimulatorTab] = useState<'calendario' | 'fluxo' | null>(null);
+  const [rentabilidadeAberta, setRentabilidadeAberta] = useState(false);
   const [flows, setFlows] = useState<SavedFlow[]>([]);
   const [flowsIndisponiveis, setFlowsIndisponiveis] = useState(false);
   /** Fluxo salvo aberto no simulador; null = simulação nova. */
@@ -349,6 +355,13 @@ function App() {
                   <ListOrdered className="w-3.5 h-3.5" />
                   Fluxo Simplificado
                 </button>
+                <button
+                  onClick={() => setRentabilidadeAberta(true)}
+                  className="col-span-2 flex items-center justify-center gap-1.5 py-3 bg-zinc-900/20 hover:bg-zinc-900 border border-zinc-900 text-zinc-400 hover:text-zinc-200 font-bold rounded-xl transition duration-150 cursor-pointer text-[10px] uppercase tracking-wider"
+                >
+                  <LineChart className="w-3.5 h-3.5" />
+                  Rentabilidade Real
+                </button>
               </div>
             </div>
 
@@ -391,6 +404,13 @@ function App() {
             setSimulatorFlow(null);
           }}
         />
+      )}
+
+      {/* Rentabilidade Real: indicadores e gráficos contra o IPCA */}
+      {rentabilidadeAberta && (
+        <Suspense fallback={null}>
+          <RentabilidadePanel debts={debts} payments={payments} onClose={() => setRentabilidadeAberta(false)} />
+        </Suspense>
       )}
 
       {/* Modal de Abatimentos / Drawer */}
